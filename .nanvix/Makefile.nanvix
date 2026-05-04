@@ -42,24 +42,30 @@ ifdef CONFIG_NANVIX
 
   EXE = .elf
   SYSROOT_PATH := $(abspath $(NANVIX_HOME))
+  NANVIX_BUILDROOT ?= $(NANVIX_HOME)
+  BUILDROOT_PATH := $(abspath $(NANVIX_BUILDROOT))
 
   ifdef CONFIG_NANVIX_DOCKER
     DOCKER_TOOLCHAIN_PATH := /opt/nanvix
     DOCKER_SYSROOT_PATH := /mnt/sysroot
+    DOCKER_BUILDROOT_PATH := /mnt/buildroot
     DOCKER_WORKSPACE_PATH := /mnt/workspace
     DOCKER_UID := $(shell id -u)
     DOCKER_GID := $(shell id -g)
     DOCKER_RUN := docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
       -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
       -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH):ro \
+      -v $(BUILDROOT_PATH):$(DOCKER_BUILDROOT_PATH):ro \
       -w $(DOCKER_WORKSPACE_PATH) \
       -e HOME=/tmp \
       $(NANVIX_DOCKER_IMAGE)
     EFFECTIVE_SYSROOT := $(DOCKER_SYSROOT_PATH)
+    EFFECTIVE_BUILDROOT := $(DOCKER_BUILDROOT_PATH)
     EFFECTIVE_TOOLCHAIN := $(DOCKER_TOOLCHAIN_PATH)
     RUN_CMD := $(DOCKER_RUN)
   else
     EFFECTIVE_SYSROOT := $(SYSROOT_PATH)
+    EFFECTIVE_BUILDROOT := $(BUILDROOT_PATH)
     EFFECTIVE_TOOLCHAIN := $(NANVIX_TOOLCHAIN)
     RUN_CMD :=
   endif
@@ -93,7 +99,9 @@ $(STATICLIB):
 	    --without-python --without-threads --without-http --without-ftp \
 	    --without-lzma --without-debug --without-catalog --without-readline \
 	    --without-history --without-modules \
-	    --with-zlib="$(EFFECTIVE_SYSROOT)" && \
+	    --with-zlib="$(EFFECTIVE_BUILDROOT)" \
+	    CFLAGS="-I$(EFFECTIVE_BUILDROOT)/include" \
+	    LDFLAGS="-L$(EFFECTIVE_BUILDROOT)/lib" && \
 	  make -j$(NPROC) libxml2.la'
 
 # ===========================================================================
@@ -112,7 +120,7 @@ test-integration: $(STATICLIB)
 	  i686-nanvix-gcc \
 	    -Iinclude -Iinclude/libxml \
 	    .nanvix/test/test_libxml2.c \
-	    -L.libs -L$(EFFECTIVE_SYSROOT)/lib \
+	    -L.libs -L$(EFFECTIVE_BUILDROOT)/lib -L$(EFFECTIVE_SYSROOT)/lib \
 	    -T$(EFFECTIVE_SYSROOT)/lib/user.ld -static -Wl,-z,noexecstack \
 	    -lxml2 -lz \
 	    -Wl,--start-group \
