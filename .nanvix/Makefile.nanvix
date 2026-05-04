@@ -105,8 +105,24 @@ test-smoke: $(STATICLIB)
 	@test -f .libs/libxml2.a || { echo "FAIL: libxml2.a not found"; exit 1; }
 	@echo "  PASS: libxml2 smoke tests"
 
-test-integration: test-smoke
-	@echo "  PASS: libxml2 integration tests (static library only)"
+test-integration: $(STATICLIB)
+	@echo "=== libxml2 integration tests ==="
+	$(RUN_CMD) sh -c '\
+	  export PATH="$(EFFECTIVE_TOOLCHAIN)/bin:$$PATH" && \
+	  i686-nanvix-gcc \
+	    -Iinclude -Iinclude/libxml \
+	    .nanvix/test/test_libxml2.c \
+	    -L.libs -L$(EFFECTIVE_SYSROOT)/lib \
+	    -T$(EFFECTIVE_SYSROOT)/lib/user.ld -static -Wl,-z,noexecstack \
+	    -lxml2 -lz \
+	    -Wl,--start-group \
+	    $(EFFECTIVE_SYSROOT)/lib/libposix.a \
+	    $(EFFECTIVE_TOOLCHAIN)/i686-nanvix/lib/libc.a \
+	    $(EFFECTIVE_TOOLCHAIN)/i686-nanvix/lib/libm.a \
+	    -Wl,--end-group \
+	    -o test_libxml2.elf'
+	@echo "  OK: test_libxml2.elf built"
+	@echo "  PASS: libxml2 integration tests"
 
 test-functional: test-integration
 	@echo "  PASS: libxml2 functional tests (library only, no runtime tests)"
@@ -155,6 +171,6 @@ install: $(STATICLIB)
 
 clean:
 	-make clean 2>/dev/null || true
-	rm -rf dist/ .libs/*.a
+	rm -rf dist/ .libs/*.a test_libxml2.elf
 
 .PHONY: all clean test test-smoke test-integration test-functional package verify-package install
