@@ -64,3 +64,4 @@ Makefile.in
 /m4/lt*.m4
 /py-compile
 /stamp-h1
+dist/

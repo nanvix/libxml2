@@ -1,0 +1,9 @@
+#!/bin/sh
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+# OS dispatcher – delegates to platform-specific bootstrap wrapper.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT) exec pwsh -NoLogo -File "$(dirname "$0")/z.ps1" "$@" ;;
+  *) exec "$(dirname "$0")/z.sh" "$@" ;;
+esac
