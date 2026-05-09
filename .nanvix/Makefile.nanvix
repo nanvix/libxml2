@@ -158,14 +158,14 @@ package: all
 	@echo '  --version) echo "2.12.9" ;;' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
 	@echo 'esac' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
 	chmod +x dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	tar -cjf dist/$(ARTIFACT_NAME).tar.bz2 -C dist/$(ARTIFACT_NAME) sysroot
-	@echo "  Package: dist/$(ARTIFACT_NAME).tar.bz2"
+	tar -czf dist/$(ARTIFACT_NAME).tar.gz -C dist/$(ARTIFACT_NAME) sysroot
+	@echo "  Package: dist/$(ARTIFACT_NAME).tar.gz"
 
 verify-package:
 	@echo "=== Verifying libxml2 package ==="
 	$(eval ARTIFACT_NAME := libxml2-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
-	@test -f "dist/$(ARTIFACT_NAME).tar.bz2" || { echo "FAIL: tarball not found"; exit 1; }
-	@tar tjf "dist/$(ARTIFACT_NAME).tar.bz2" | grep -q 'sysroot/lib/libxml2.a' || { echo "FAIL: missing libxml2.a"; exit 1; }
+	@test -f "dist/$(ARTIFACT_NAME).tar.gz" || { echo "FAIL: tarball not found"; exit 1; }
+	@tar tzf "dist/$(ARTIFACT_NAME).tar.gz" | grep -q 'sysroot/lib/libxml2.a' || { echo "FAIL: missing libxml2.a"; exit 1; }
 	@echo "  PASS: libxml2 package verification"
 
 # ===========================================================================
