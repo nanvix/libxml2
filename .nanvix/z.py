@@ -88,44 +88,6 @@ class Libxml2Build(ZScript):
         args.extend(targets)
         return args
 
-    def setup(self) -> bool:
-        """Download the Nanvix sysroot.
-
-        Dependencies are now shipped as ``.tar.gz`` but nanvix-zutil
-        v0.8.x hardcodes ``r:bz2`` extraction.  Override to patch the
-        artifact pattern **and** the extraction mode before delegating.
-        """
-        for dep in self.manifest.dependencies:
-            if dep.artifact_pattern.endswith(".tar.bz2"):
-                dep.artifact_pattern = dep.artifact_pattern.replace(
-                    ".tar.bz2", ".tar.gz"
-                )
-        import tarfile as _tarfile
-
-        from nanvix_zutil.buildroot import Buildroot
-
-        _orig_install = Buildroot.install_dep
-
-        def _install_gz(self_br: Buildroot, *a: object, **kw: object) -> None:
-            _real_open = _tarfile.open
-
-            def _open_gz(name: object, mode: str = "r", **k: object) -> object:  # type: ignore[override]
-                if mode == "r:bz2":
-                    mode = "r:gz"
-                return _real_open(name, mode, **k)  # type: ignore[arg-type]
-
-            _tarfile.open = _open_gz  # type: ignore[assignment]
-            try:
-                _orig_install(self_br, *a, **kw)  # type: ignore[arg-type]
-            finally:
-                _tarfile.open = _real_open  # type: ignore[assignment]
-
-        Buildroot.install_dep = _install_gz  # type: ignore[assignment]
-        try:
-            return super().setup()
-        finally:
-            Buildroot.install_dep = _orig_install  # type: ignore[assignment]
-
     def build(self) -> None:
         """Cross-compile libxml2.a for Nanvix."""
         self.run(*self._make_args("all"), cwd=self.repo_root)
