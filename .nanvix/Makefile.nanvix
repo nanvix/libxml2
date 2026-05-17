@@ -133,7 +133,36 @@ test-integration: $(STATICLIB)
 	@echo "  PASS: libxml2 integration tests"
 
 test-functional: test-integration
-	@echo "  PASS: libxml2 functional tests (library only, no runtime tests)"
+	@echo "=== libxml2 functional tests ==="
+ifeq ($(PROCESS_MODE),standalone)
+	@echo "  NOTE: Standalone functional tests are handled via ./z.sh."
+	@echo "  Delegating to: ./z.sh test test-functional"
+	@./z.sh test test-functional
+else
+ifdef CONFIG_NANVIX_DOCKER
+	@echo "  Running test_libxml2$(EXE) via nanvixd.elf (Docker, platform=$(PLATFORM), mode=$(PROCESS_MODE))..."
+	$(RUN_CMD) sh -c '\
+	  TMPDIR=$$(mktemp -d /tmp/nanvix-libxml2-XXXXXX) && \
+	  trap "rm -rf $$TMPDIR" EXIT && \
+	  mkdir -p $$TMPDIR/ramfs/tmp && \
+	  $(EFFECTIVE_SYSROOT)/bin/mkramfs.elf -o $$TMPDIR/rootfs.img $$TMPDIR/ramfs/ && \
+	  timeout --foreground 120 $(EFFECTIVE_SYSROOT)/bin/nanvixd.elf \
+	    -bin-dir $(EFFECTIVE_SYSROOT)/bin -ramfs $$TMPDIR/rootfs.img \
+	    -- $(DOCKER_WORKSPACE_PATH)/test_libxml2$(EXE)'
+	@echo "  PASS: test_libxml2 (exit code 0)"
+else
+	@echo "  Running test_libxml2$(EXE) via nanvixd.elf (platform=$(PLATFORM), mode=$(PROCESS_MODE))..."
+	@TMPDIR=$$(mktemp -d /tmp/nanvix-libxml2-XXXXXX) && \
+	  trap "rm -rf $$TMPDIR" EXIT && \
+	  mkdir -p $$TMPDIR/ramfs/tmp && \
+	  "$(SYSROOT_PATH)/bin/mkramfs.elf" -o $$TMPDIR/rootfs.img $$TMPDIR/ramfs/ && \
+	  cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd.elf \
+	    -bin-dir ./bin -ramfs $$TMPDIR/rootfs.img \
+	    -- $(abspath test_libxml2$(EXE))
+	@echo "  PASS: test_libxml2 (exit code 0)"
+endif
+endif
+	@echo "  PASS: libxml2 functional tests"
 
 test: test-smoke test-integration test-functional
 	@echo "=== All libxml2 tests PASSED ==="
