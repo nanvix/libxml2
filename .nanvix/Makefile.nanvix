@@ -1,167 +1,134 @@
-# Makefile.nanvix - libxml2 cross-compilation for Nanvix
-#
 # Copyright(c) The Maintainers of Nanvix.
 # Licensed under the MIT License.
+#
+# Usage: make -f .nanvix/Makefile.nanvix PLATFORM=<platform> PROCESS_MODE=<mode> \
+#    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_BUILDROOT=<buildroot> \
+#    NANVIX_TOOLCHAIN=<toolchain> [target]
+#
+# Targets:
+#   all              Build libxml2.a and the integration test ELF
+#   test             Run all tests (smoke, integration, functional)
+#   test-smoke       Verify build artifacts (no runtime)
+#   test-integration Verify the test ELF was produced
+#   test-functional  Run the test ELF on nanvixd.elf
+#   package          Create a release tarball with libs, headers, xml2-config
+#   verify-package   Verify the contents of the release tarball
+#   clean            Remove build artifacts
 
 # ===========================================================================
-# Toolchain Detection
+# Global Variables
 # ===========================================================================
 
-NANVIX_DOCKER_IMAGE ?= ghcr.io/nanvix/toolchain-gcc:latest
+# Some assumptions:
+# 1. This makefile is expected to be invoked via z.py.
+# 2. Build goals require the cross-toolchain at $(NANVIX_TOOLCHAIN); other
+#    goals (test-*, package, verify-package, clean) are pure host-side.
+# 3. Build ALWAYS runs before test and release.
 
-ifdef CONFIG_NANVIX
-  NANVIX_TOOLCHAIN ?= /opt/nanvix
-  NANVIX_HOME ?= $(HOME)/nanvix
+.DEFAULT_GOAL=all
+EXE = .elf
 
-  ifndef CONFIG_NANVIX_DOCKER
-    ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc),)
-      DOCKER_AVAILABLE := $(shell command -v docker 2>/dev/null)
-      ifdef DOCKER_AVAILABLE
-        DOCKER_IMAGE_EXISTS := $(shell docker image inspect $(NANVIX_DOCKER_IMAGE) >/dev/null 2>&1 && echo yes)
-        ifdef DOCKER_IMAGE_EXISTS
-          CONFIG_NANVIX_DOCKER := y
-          $(info [nanvix] Using Docker (native toolchain not found at $(NANVIX_TOOLCHAIN)))
-        else
-          $(error Docker image $(NANVIX_DOCKER_IMAGE) not found. Run: docker pull $(NANVIX_DOCKER_IMAGE))
-        endif
-      else
-        $(error Nanvix toolchain not found at $(NANVIX_TOOLCHAIN) and Docker not available)
-      endif
-    endif
-  else
-    DOCKER_AVAILABLE := $(shell command -v docker 2>/dev/null)
-    ifndef DOCKER_AVAILABLE
-      $(error CONFIG_NANVIX_DOCKER=y but Docker is not installed)
-    endif
-    DOCKER_IMAGE_EXISTS := $(shell docker image inspect $(NANVIX_DOCKER_IMAGE) >/dev/null 2>&1 && echo yes)
-    ifndef DOCKER_IMAGE_EXISTS
-      $(error Docker image $(NANVIX_DOCKER_IMAGE) not found. Run: docker pull $(NANVIX_DOCKER_IMAGE))
-    endif
-    $(info [nanvix] Using Docker (explicitly requested))
-  endif
+STATICLIB := .libs/libxml2.a
+TEST_SRC  := .nanvix/test/test_libxml2.c
+TEST_ELF  := test_libxml2$(EXE)
 
-  EXE = .elf
-  SYSROOT_PATH := $(abspath $(NANVIX_HOME))
-  NANVIX_BUILDROOT ?= $(NANVIX_HOME)
-  BUILDROOT_PATH := $(abspath $(NANVIX_BUILDROOT))
+_NANVIX_DOCKER_BUILD_GOALS := all $(STATICLIB) $(TEST_ELF)
+_NANVIX_GOALS := $(or $(MAKECMDGOALS),$(.DEFAULT_GOAL))
 
-  ifdef CONFIG_NANVIX_DOCKER
-    DOCKER_TOOLCHAIN_PATH := /opt/nanvix
-    DOCKER_SYSROOT_PATH := /mnt/sysroot
-    DOCKER_BUILDROOT_PATH := /mnt/buildroot
-    DOCKER_WORKSPACE_PATH := /mnt/workspace
-    DOCKER_UID := $(shell id -u)
-    DOCKER_GID := $(shell id -g)
-    DOCKER_RUN := docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
-      -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
-      -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH):ro \
-      -v $(BUILDROOT_PATH):$(DOCKER_BUILDROOT_PATH):ro \
-      -w $(DOCKER_WORKSPACE_PATH) \
-      -e HOME=/tmp \
-      $(NANVIX_DOCKER_IMAGE)
-    EFFECTIVE_SYSROOT := $(DOCKER_SYSROOT_PATH)
-    EFFECTIVE_BUILDROOT := $(DOCKER_BUILDROOT_PATH)
-    EFFECTIVE_TOOLCHAIN := $(DOCKER_TOOLCHAIN_PATH)
-    RUN_CMD := $(DOCKER_RUN)
-  else
-    EFFECTIVE_SYSROOT := $(SYSROOT_PATH)
-    EFFECTIVE_BUILDROOT := $(BUILDROOT_PATH)
-    EFFECTIVE_TOOLCHAIN := $(NANVIX_TOOLCHAIN)
-    RUN_CMD :=
-  endif
-else
-  ifneq ($(MAKECMDGOALS),clean)
-    $(error CONFIG_NANVIX must be set to 'y')
-  endif
-  EXE = .elf
+# Ensure required variables are defined.
+_REQUIRED := PLATFORM PROCESS_MODE MEMORY_SIZE NANVIX_HOME NANVIX_BUILDROOT NANVIX_TOOLCHAIN
+ifneq ($(filter-out clean,$(_NANVIX_GOALS)),)
+  $(foreach v,$(_REQUIRED),\
+    $(if $($v),,$(error Required variable $v not set))\
+  )
 endif
 
-PREFIX ?= $(SYSROOT_PATH)
-PLATFORM ?= unknown
-PROCESS_MODE ?= unknown
-MEMORY_SIZE ?= unknown
+SYSROOT_PATH   := $(abspath $(NANVIX_HOME))
+BUILDROOT_PATH := $(abspath $(NANVIX_BUILDROOT))
 NPROC := $(shell nproc 2>/dev/null || echo 4)
+
+# ===========================================================================
+# Build Mode Variables
+# ===========================================================================
+
+_BUILD := $(filter $(_NANVIX_DOCKER_BUILD_GOALS),$(_NANVIX_GOALS))
+_NONBUILD := $(filter-out $(_NANVIX_DOCKER_BUILD_GOALS),$(_NANVIX_GOALS))
+ifneq ($(_BUILD),)
+  ifneq ($(_NONBUILD),)
+    $(error Cannot mix build and non-build targets. Build targets: $(_NANVIX_DOCKER_BUILD_GOALS))
+  endif
+
+  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc),)
+    $(error Nanvix toolchain not found at $(NANVIX_TOOLCHAIN))
+  endif
+endif
 
 # ===========================================================================
 # Build Targets
 # ===========================================================================
 
-STATICLIB = .libs/libxml2.a
-
-all: $(STATICLIB)
+all: $(STATICLIB) $(TEST_ELF)
 
 $(STATICLIB):
-	$(RUN_CMD) sh -c '\
-	  export PATH="$(EFFECTIVE_TOOLCHAIN)/bin:$$PATH" && \
+	sh -c '\
+	  export PATH="$(NANVIX_TOOLCHAIN)/bin:$$PATH" && \
 	  ./configure --host=i686-nanvix \
 	    --prefix=/usr/local \
 	    --enable-static --disable-shared --disable-maintainer-mode \
 	    --without-python --without-threads --without-http --without-ftp \
 	    --without-lzma --without-debug --without-catalog --without-readline \
 	    --without-history --without-modules \
-	    --with-zlib="$(EFFECTIVE_BUILDROOT)" \
-	    CFLAGS="-I$(EFFECTIVE_BUILDROOT)/include" \
-	    LDFLAGS="-L$(EFFECTIVE_BUILDROOT)/lib" && \
+	    --with-zlib="$(BUILDROOT_PATH)" \
+	    CFLAGS="-I$(BUILDROOT_PATH)/include" \
+	    LDFLAGS="-L$(BUILDROOT_PATH)/lib" && \
 	  make -j$(NPROC) libxml2.la'
+
+$(TEST_ELF): $(TEST_SRC)
+	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found; run 'build' first"; exit 1; }
+	$(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc \
+	  -Iinclude -Iinclude/libxml \
+	  $(TEST_SRC) \
+	  -L.libs -L$(BUILDROOT_PATH)/lib -L$(SYSROOT_PATH)/lib \
+	  -T$(SYSROOT_PATH)/lib/user.ld -static -Wl,-z,noexecstack \
+	  -lxml2 -lz \
+	  -Wl,--start-group \
+	  $(SYSROOT_PATH)/lib/libposix.a \
+	  $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a \
+	  $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a \
+	  -Wl,--end-group \
+	  -o $@
 
 # ===========================================================================
 # Test Targets
 # ===========================================================================
 
-test-smoke: $(STATICLIB)
+test-smoke:
 	@echo "=== libxml2 smoke tests ==="
-	@test -f .libs/libxml2.a || { echo "FAIL: libxml2.a not found"; exit 1; }
+	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found"; exit 1; }
+	@size=$$(wc -c < $(STATICLIB)); \
+	  if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(STATICLIB) too small ($$size bytes)"; exit 1; fi
 	@echo "  PASS: libxml2 smoke tests"
 
-test-integration: $(STATICLIB)
+test-integration:
 	@echo "=== libxml2 integration tests ==="
-	$(RUN_CMD) sh -c '\
-	  export PATH="$(EFFECTIVE_TOOLCHAIN)/bin:$$PATH" && \
-	  i686-nanvix-gcc \
-	    -Iinclude -Iinclude/libxml \
-	    .nanvix/test/test_libxml2.c \
-	    -L.libs -L$(EFFECTIVE_BUILDROOT)/lib -L$(EFFECTIVE_SYSROOT)/lib \
-	    -T$(EFFECTIVE_SYSROOT)/lib/user.ld -static -Wl,-z,noexecstack \
-	    -lxml2 -lz \
-	    -Wl,--start-group \
-	    $(EFFECTIVE_SYSROOT)/lib/libposix.a \
-	    $(EFFECTIVE_TOOLCHAIN)/i686-nanvix/lib/libc.a \
-	    $(EFFECTIVE_TOOLCHAIN)/i686-nanvix/lib/libm.a \
-	    -Wl,--end-group \
-	    -o test_libxml2.elf'
-	@echo "  OK: test_libxml2.elf built"
+	@test -f $(TEST_ELF) || { echo "  FAIL: $(TEST_ELF) not built"; exit 1; }
+	@size=$$(wc -c < $(TEST_ELF)); \
+	  if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(TEST_ELF) too small ($$size bytes)"; exit 1; fi
+	@echo "  OK: $(TEST_ELF) ($$size bytes)"
 	@echo "  PASS: libxml2 integration tests"
 
-test-functional: test-integration
+test-functional:
 	@echo "=== libxml2 functional tests ==="
-ifeq ($(PROCESS_MODE),standalone)
-	@echo "  NOTE: Standalone functional tests are handled via ./z.sh."
-	@echo "  Delegating to: ./z.sh test test-functional"
-	@./z.sh test test-functional
-else
-ifdef CONFIG_NANVIX_DOCKER
-	@echo "  Running test_libxml2$(EXE) via nanvixd.elf (Docker, platform=$(PLATFORM), mode=$(PROCESS_MODE))..."
-	$(RUN_CMD) sh -c '\
-	  TMPDIR=$$(mktemp -d /tmp/nanvix-libxml2-XXXXXX) && \
-	  trap "rm -rf $$TMPDIR" EXIT && \
-	  mkdir -p $$TMPDIR/ramfs/tmp && \
-	  $(EFFECTIVE_SYSROOT)/bin/mkramfs.elf -o $$TMPDIR/rootfs.img $$TMPDIR/ramfs/ && \
-	  timeout --foreground 120 $(EFFECTIVE_SYSROOT)/bin/nanvixd.elf \
-	    -bin-dir $(EFFECTIVE_SYSROOT)/bin -ramfs $$TMPDIR/rootfs.img \
-	    -- $(DOCKER_WORKSPACE_PATH)/test_libxml2$(EXE)'
-	@echo "  PASS: test_libxml2 (exit code 0)"
-else
-	@echo "  Running test_libxml2$(EXE) via nanvixd.elf (platform=$(PLATFORM), mode=$(PROCESS_MODE))..."
+	@test -f $(TEST_ELF) || { echo "  FAIL: $(TEST_ELF) not built"; exit 1; }
+	@echo "  Running $(TEST_ELF) via nanvixd.elf (platform=$(PLATFORM), mode=$(PROCESS_MODE))..."
 	@TMPDIR=$$(mktemp -d /tmp/nanvix-libxml2-XXXXXX) && \
 	  trap "rm -rf $$TMPDIR" EXIT && \
 	  mkdir -p $$TMPDIR/ramfs/tmp && \
 	  "$(SYSROOT_PATH)/bin/mkramfs.elf" -o $$TMPDIR/rootfs.img $$TMPDIR/ramfs/ && \
 	  cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd.elf \
 	    -bin-dir ./bin -ramfs $$TMPDIR/rootfs.img \
-	    -- $(abspath test_libxml2$(EXE))
-	@echo "  PASS: test_libxml2 (exit code 0)"
-endif
-endif
+	    -- $(abspath $(TEST_ELF))
+	@echo "  PASS: $(TEST_ELF) (exit code 0)"
 	@echo "  PASS: libxml2 functional tests"
 
 test: test-smoke test-integration test-functional
@@ -171,14 +138,15 @@ test: test-smoke test-integration test-functional
 # Package Target
 # ===========================================================================
 
-package: all
+package:
 	@echo "=== Packaging libxml2 release ==="
 	$(eval ARTIFACT_NAME := libxml2-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
+	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found; run 'build' first"; exit 1; }
 	rm -rf dist/$(ARTIFACT_NAME)
 	mkdir -p dist/$(ARTIFACT_NAME)/sysroot/lib \
 	         dist/$(ARTIFACT_NAME)/sysroot/include/libxml2/libxml \
 	         dist/$(ARTIFACT_NAME)/sysroot/bin
-	cp -f .libs/libxml2.a dist/$(ARTIFACT_NAME)/sysroot/lib/
+	cp -f $(STATICLIB) dist/$(ARTIFACT_NAME)/sysroot/lib/
 	cp -f include/libxml/*.h dist/$(ARTIFACT_NAME)/sysroot/include/libxml2/libxml/
 	@echo '#!/bin/sh' > dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
 	@echo 'case "$$1" in' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
@@ -193,21 +161,17 @@ package: all
 verify-package:
 	@echo "=== Verifying libxml2 package ==="
 	$(eval ARTIFACT_NAME := libxml2-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
-	@test -f "dist/$(ARTIFACT_NAME).tar.gz" || { echo "FAIL: tarball not found"; exit 1; }
-	@tar tzf "dist/$(ARTIFACT_NAME).tar.gz" | grep -q 'sysroot/lib/libxml2.a' || { echo "FAIL: missing libxml2.a"; exit 1; }
+	@test -f "dist/$(ARTIFACT_NAME).tar.gz" || { echo "  FAIL: tarball not found"; exit 1; }
+	@tar tzf "dist/$(ARTIFACT_NAME).tar.gz" | grep -q 'sysroot/lib/libxml2.a' || { echo "  FAIL: missing libxml2.a"; exit 1; }
 	@echo "  PASS: libxml2 package verification"
 
 # ===========================================================================
-# Install / Clean
+# Clean
 # ===========================================================================
 
-install: $(STATICLIB)
-	mkdir -p "$(DESTDIR)$(PREFIX)/lib" "$(DESTDIR)$(PREFIX)/include/libxml2/libxml"
-	install -m644 .libs/libxml2.a "$(DESTDIR)$(PREFIX)/lib/"
-	install -m644 include/libxml/*.h "$(DESTDIR)$(PREFIX)/include/libxml2/libxml/"
-
 clean:
-	-make clean 2>/dev/null || true
-	rm -rf dist/ .libs/*.a test_libxml2.elf
+	-$(MAKE) clean 2>/dev/null || true
+	rm -f $(TEST_ELF) Makefile
+	rm -rf dist/ .libs/
 
-.PHONY: all clean test test-smoke test-integration test-functional package verify-package install
+.PHONY: all clean test test-smoke test-integration test-functional package verify-package

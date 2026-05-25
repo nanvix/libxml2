@@ -17,7 +17,6 @@ import tempfile
 from pathlib import Path
 
 from nanvix_zutil import (
-    CFG_DOCKER_IMAGE,
     CFG_SYSROOT,
     TOOLCHAIN_CONTAINER_PATH,
     EXIT_MISSING_DEP,
@@ -27,11 +26,9 @@ from nanvix_zutil import (
 
 IS_WINDOWS = sys.platform == "win32"
 
-_MAKE_VAR_CONFIG = "CONFIG_NANVIX"
 _MAKE_VAR_HOME = "NANVIX_HOME"
 _MAKE_VAR_BUILDROOT = "NANVIX_BUILDROOT"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
-_MAKE_VAR_DOCKER_IMAGE = "NANVIX_DOCKER_IMAGE"
 _MAKE_VAR_PLATFORM = "PLATFORM"
 _MAKE_VAR_PROCESS_MODE = "PROCESS_MODE"
 _MAKE_VAR_MEMORY_SIZE = "MEMORY_SIZE"
@@ -49,9 +46,8 @@ class Libxml2Build(ZScript):
                 code=EXIT_MISSING_DEP,
                 hint="Run `./z setup` first to download the sysroot.",
             )
-        toolchain = str(TOOLCHAIN_CONTAINER_PATH)
+        toolchain_p = str(TOOLCHAIN_CONTAINER_PATH)
         sysroot_p = self.translate_path(Path(sysroot))
-        toolchain_p = toolchain
 
         # Buildroot contains dependency libraries (zlib).
         buildroot_dir = self.nanvix_dir / "buildroot"
@@ -64,19 +60,10 @@ class Libxml2Build(ZScript):
             "make",
             "-f",
             ".nanvix/Makefile.nanvix",
-            f"{_MAKE_VAR_CONFIG}=y",
             f"{_MAKE_VAR_HOME}={sysroot_p}",
             f"{_MAKE_VAR_BUILDROOT}={buildroot_p}",
             f"{_MAKE_VAR_TOOLCHAIN}={toolchain_p}",
         ]
-
-        # Forward the Docker image from nanvix-zutil config so the
-        # Makefile's Docker autodetection uses the same image that was
-        # pulled during setup (important for CI where the reusable
-        # workflow controls which image is available).
-        docker_image = self.config.get(CFG_DOCKER_IMAGE, "")
-        if docker_image:
-            args.append(f"{_MAKE_VAR_DOCKER_IMAGE}={docker_image}")
 
         args.extend(
             [
@@ -91,7 +78,7 @@ class Libxml2Build(ZScript):
 
     def build(self) -> None:
         """Cross-compile libxml2.a for Nanvix."""
-        self.run(*self._make_args("all"), cwd=self.repo_root)
+        self.run(*self._make_args("all"), cwd=self.repo_root, docker=True)
 
     def test(self) -> None:
         """Run the libxml2 test suite.
@@ -121,12 +108,20 @@ class Libxml2Build(ZScript):
                 else:
                     make_targets = ["test-integration"]
             if make_targets:
-                self.run(*self._make_args(*make_targets), cwd=self.repo_root)
+                self.run(
+                    *self._make_args(*make_targets),
+                    cwd=self.repo_root,
+                    docker=False,
+                )
             if needs_functional:
                 self._run_functional_standalone()
         else:
             targets = self.targets if self.targets else ["test"]
-            self.run(*self._make_args(*targets), cwd=self.repo_root)
+            self.run(
+                *self._make_args(*targets),
+                cwd=self.repo_root,
+                docker=False,
+            )
 
     def _get_sysroot(self) -> str:
         """Return the sysroot path or fatal if unset."""
@@ -321,8 +316,8 @@ class Libxml2Build(ZScript):
 
     def release(self) -> None:
         """Package the libxml2 release tarball and verify it."""
-        self.run(*self._make_args("package"), cwd=self.repo_root)
-        self.run(*self._make_args("verify-package"), cwd=self.repo_root)
+        self.run(*self._make_args("package"), cwd=self.repo_root, docker=False)
+        self.run(*self._make_args("verify-package"), cwd=self.repo_root, docker=False)
 
     def clean(self) -> None:
         """Remove build artifacts."""
@@ -332,6 +327,7 @@ class Libxml2Build(ZScript):
             ".nanvix/Makefile.nanvix",
             "clean",
             cwd=self.repo_root,
+            docker=False,
         )
 
 
