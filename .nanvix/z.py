@@ -18,10 +18,12 @@ from pathlib import Path
 
 from nanvix_zutil import (
     CFG_SYSROOT,
-    TOOLCHAIN_CONTAINER_PATH,
     EXIT_MISSING_DEP,
+    TOOLCHAIN_CONTAINER_PATH,
     ZScript,
     log,
+    make_initrd,
+    run,
 )
 
 IS_WINDOWS = sys.platform == "win32"
@@ -47,12 +49,18 @@ class Libxml2Build(ZScript):
                 hint="Run `./z setup` first to download the sysroot.",
             )
         toolchain_p = str(TOOLCHAIN_CONTAINER_PATH)
-        sysroot_p = self.translate_path(Path(sysroot))
+        sysroot_p = (
+            self.docker.translate_path(Path(sysroot)) if self.docker else Path(sysroot)
+        )
 
         # Buildroot contains dependency libraries (zlib).
         buildroot_dir = self.nanvix_dir / "buildroot"
         if buildroot_dir.is_dir():
-            buildroot_p = self.translate_path(buildroot_dir)
+            buildroot_p = (
+                self.docker.translate_path(buildroot_dir)
+                if self.docker
+                else buildroot_dir
+            )
         else:
             buildroot_p = sysroot_p
 
@@ -78,7 +86,7 @@ class Libxml2Build(ZScript):
 
     def build(self) -> None:
         """Cross-compile libxml2.a for Nanvix."""
-        self.run(*self._make_args("all"), cwd=self.repo_root, docker=True)
+        run(*self._make_args("all"), cwd=self.repo_root, docker=self.docker)
 
     def test(self) -> None:
         """Run the libxml2 test suite.
@@ -108,19 +116,17 @@ class Libxml2Build(ZScript):
                 else:
                     make_targets = ["test-integration"]
             if make_targets:
-                self.run(
+                run(
                     *self._make_args(*make_targets),
                     cwd=self.repo_root,
-                    docker=False,
                 )
             if needs_functional:
                 self._run_functional_standalone()
         else:
             targets = self.targets if self.targets else ["test"]
-            self.run(
+            run(
                 *self._make_args(*targets),
                 cwd=self.repo_root,
-                docker=False,
             )
 
     def _get_sysroot(self) -> str:
@@ -155,7 +161,7 @@ class Libxml2Build(ZScript):
         mkramfs = sysroot_path / "bin" / "mkramfs.elf"
 
         # Bundle test_libxml2.elf + daemons into an initrd.
-        initrd = self.make_initrd("test_libxml2.elf")
+        initrd = make_initrd(self, "test_libxml2.elf")
 
         try:
             with tempfile.TemporaryDirectory(prefix="nanvix_libxml2_") as tmpdir:
@@ -165,18 +171,17 @@ class Libxml2Build(ZScript):
                 (ramfs_dir / "tmp").mkdir(exist_ok=True)
                 ramfs_img = tmpdir_path / "rootfs.img"
 
-                self.run(
+                run(
                     str(mkramfs),
                     "-o",
                     str(ramfs_img),
                     str(ramfs_dir),
-                    docker=False,
                 )
 
-                # self.run() raises SystemExit on non-zero exit code,
+                # run() raises SystemExit on non-zero exit code,
                 # and nanvixd propagates the guest's exit status, so
                 # reaching the PASS line guarantees exit code 0.
-                self.run(
+                run(
                     str(sysroot_path / "bin" / "nanvixd.elf"),
                     "-bin-dir",
                     str(sysroot_path / "bin"),
@@ -184,7 +189,6 @@ class Libxml2Build(ZScript):
                     str(ramfs_img),
                     "--",
                     str(initrd),
-                    docker=False,
                     timeout=120,
                 )
         finally:
@@ -262,7 +266,7 @@ class Libxml2Build(ZScript):
                         )
                     shutil.copy2(binary, repo_elf)
                     copied_elf = True
-                initrd = self.make_initrd(binary.name)
+                initrd = make_initrd(self, binary.name)
                 with tempfile.TemporaryDirectory(prefix=f"nanvix_{name}_") as tmpdir:
                     tmpdir_path = Path(tmpdir)
                     ramfs_dir = tmpdir_path / "ramfs"
@@ -271,12 +275,11 @@ class Libxml2Build(ZScript):
                     ramfs_img = tmpdir_path / f"rootfs_{name}.img"
 
                     try:
-                        self.run(
+                        run(
                             str(mkramfs),
                             "-o",
                             str(ramfs_img),
                             str(ramfs_dir),
-                            docker=False,
                         )
                     except SystemExit:
                         print(f"FAIL {name} (mkramfs failed)")
@@ -284,7 +287,7 @@ class Libxml2Build(ZScript):
                         continue
 
                     try:
-                        self.run(
+                        run(
                             str(nanvixd),
                             "-bin-dir",
                             str(sysroot_path / "bin"),
@@ -292,7 +295,6 @@ class Libxml2Build(ZScript):
                             str(ramfs_img),
                             "--",
                             str(initrd),
-                            docker=False,
                             timeout=120,
                         )
                     except SystemExit:
@@ -316,18 +318,17 @@ class Libxml2Build(ZScript):
 
     def release(self) -> None:
         """Package the libxml2 release tarball and verify it."""
-        self.run(*self._make_args("package"), cwd=self.repo_root, docker=False)
-        self.run(*self._make_args("verify-package"), cwd=self.repo_root, docker=False)
+        run(*self._make_args("package"), cwd=self.repo_root)
+        run(*self._make_args("verify-package"), cwd=self.repo_root)
 
     def clean(self) -> None:
         """Remove build artifacts."""
-        self.run(
+        run(
             "make",
             "-f",
             ".nanvix/Makefile.nanvix",
             "clean",
             cwd=self.repo_root,
-            docker=False,
         )
 
 
