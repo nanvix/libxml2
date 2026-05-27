@@ -6,7 +6,7 @@
 Usage:
     ./z setup     # Download Nanvix sysroot
     ./z build     # Cross-compile libxml2.a
-    ./z test      # Run test suite (smoke + integration + functional)
+    ./z test      # Run functional tests
     ./z release   # Package release tarball
     ./z clean     # Remove build artifacts
 """
@@ -104,40 +104,43 @@ class Libxml2Build(ZScript):
         """Cross-compile libxml2.a for Nanvix."""
         run(*self._make_args("all"), cwd=self.repo_root, docker=self.docker)
 
-    def test(self) -> None:
-        """Run the libxml2 test suite.
+    # Test targets accepted by `./z test` on paths that bypass the
+    # Makefile (Windows and standalone Linux). Both aliases run the same
+    # functional test, but we accept either to mirror Makefile naming.
+    _SUPPORTED_TEST_TARGETS: frozenset[str] = frozenset({"test", "test-functional"})
 
-        Smoke and integration tests are always delegated to the Makefile.
-        The functional test in standalone mode is handled in Python via
-        make_initrd so that initrd creation is shared across platforms.
+    def _validate_test_targets(self) -> None:
+        """Fail fast on unsupported `./z test <target>` arguments.
+
+        Only the functional test is supported on Windows and in
+        standalone mode; honoring stale Makefile-only targets would
+        silently no-op.
+        """
+        if not self.targets:
+            return
+        unsupported = [t for t in self.targets if t not in self._SUPPORTED_TEST_TARGETS]
+        if unsupported:
+            allowed = ", ".join(sorted(self._SUPPORTED_TEST_TARGETS))
+            log.fatal(
+                f"Unsupported test target(s): {', '.join(unsupported)}.",
+                code=EXIT_MISSING_DEP,
+                hint=f"Supported targets: {allowed}.",
+            )
+
+    def test(self) -> None:
+        """Run the libxml2 functional test suite.
+
+        Functional tests run the test ELF under nanvixd. They exercise the
+        full library and are the only tests supported across all platforms.
         """
         if IS_WINDOWS:
+            self._validate_test_targets()
             self._run_tests_windows()
             return
 
         if self.config.deployment_mode == "standalone":
-            targets = self.targets if self.targets else []
-            # Targets that require the Python functional path.
-            _functional_targets = {"test", "test-functional"}
-            needs_functional = not targets or bool(set(targets) & _functional_targets)
-            # Delegate non-functional targets to the Makefile.
-            make_targets = [t for t in targets if t not in _functional_targets]
-            if not targets:
-                make_targets = ["test-smoke", "test-integration"]
-            elif needs_functional and not make_targets:
-                # Ensure Makefile prerequisites run when only functional
-                # targets are requested (build + smoke/integration).
-                if "test" in targets:
-                    make_targets = ["test-smoke", "test-integration"]
-                else:
-                    make_targets = ["test-integration"]
-            if make_targets:
-                run(
-                    *self._make_args(*make_targets),
-                    cwd=self.repo_root,
-                )
-            if needs_functional:
-                self._run_functional_standalone()
+            self._validate_test_targets()
+            self._run_functional_standalone()
         else:
             targets = self.targets if self.targets else ["test"]
             run(

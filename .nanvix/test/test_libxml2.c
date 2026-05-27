@@ -1,4 +1,4 @@
-/* Minimal libxml2 integration test for Nanvix. */
+/* Minimal libxml2 functional test for Nanvix. */
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 
