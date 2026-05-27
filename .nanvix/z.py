@@ -47,6 +47,7 @@ class Libxml2Build(ZScript):
     # is discarded when the container exits.
     _BUILD_OUTPUTS: tuple[str, ...] = (
         ".libs/libxml2.a",
+        "include/libxml/xmlversion.h",
         "test_libxml2.elf",
     )
 
