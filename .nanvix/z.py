@@ -18,6 +18,7 @@ from pathlib import Path
 
 from nanvix_zutil import (
     CFG_SYSROOT,
+    DockerConfig,
     EXIT_MISSING_DEP,
     TOOLCHAIN_CONTAINER_PATH,
     ZScript,
@@ -38,6 +39,21 @@ _MAKE_VAR_MEMORY_SIZE = "MEMORY_SIZE"
 
 class Libxml2Build(ZScript):
     """Build script for nanvix/libxml2."""
+
+    # Files produced by the cross-compile step that must be copied back
+    # from the container's build directory into the host workspace. The
+    # zutils Docker wrapper builds in a container-local scratch dir for
+    # performance (especially on Windows), so anything not listed here
+    # is discarded when the container exits.
+    _BUILD_OUTPUTS: tuple[str, ...] = (
+        ".libs/libxml2.a",
+        "test_libxml2.elf",
+    )
+
+    def docker_config(self, image: str) -> DockerConfig:
+        cfg = super().docker_config(image)
+        cfg.output_files = list(self._BUILD_OUTPUTS)
+        return cfg
 
     def _make_args(self, *targets: str) -> list[str]:
         """Build the common make argument list."""
