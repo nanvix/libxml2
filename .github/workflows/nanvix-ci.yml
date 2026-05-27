@@ -34,6 +34,7 @@ jobs:
       memory-sizes: '["256mb"]'
       windows-matrix-exclude: '[]'
       skip-full-test-modes: '["multi-process","single-process","standalone"]'
+      standalone-test-args: "test-functional"
       caller-event-name: ${{ github.event_name }}
       windows-test: true
       docker-image: "ghcr.io/nanvix/toolchain-gcc:sha-34a3641" # yamllint disable-line rule:line-length
@@ -51,6 +52,7 @@ jobs:
       memory-sizes: '["256mb"]'
       windows-matrix-exclude: '[]'
       skip-full-test-modes: '["multi-process","single-process","standalone"]'
+      standalone-test-args: "test-functional"
       caller-event-name: 'schedule'
       windows-test: true
       docker-image: "ghcr.io/nanvix/toolchain-gcc:sha-34a3641" # yamllint disable-line rule:line-length
