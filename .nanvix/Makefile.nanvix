@@ -6,10 +6,8 @@
 #    NANVIX_TOOLCHAIN=<toolchain> [target]
 #
 # Targets:
-#   all              Build libxml2.a and the integration test ELF
-#   test             Run all tests (smoke, integration, functional)
-#   test-smoke       Verify build artifacts (no runtime)
-#   test-integration Verify the test ELF was produced
+#   all              Build libxml2.a and the test ELF
+#   test             Run functional tests
 #   test-functional  Run the test ELF on nanvixd.elf
 #   package          Create a release tarball with libs, headers, xml2-config
 #   verify-package   Verify the contents of the release tarball
@@ -102,24 +100,14 @@ $(TEST_ELF): $(TEST_SRC)
 # Test Targets
 # ===========================================================================
 
-test-smoke:
-	@echo "=== libxml2 smoke tests ==="
+test-functional:
+	@echo "=== libxml2 functional tests ==="
 	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found"; exit 1; }
 	@size=$$(wc -c < $(STATICLIB)); \
 	  if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(STATICLIB) too small ($$size bytes)"; exit 1; fi
-	@echo "  PASS: libxml2 smoke tests"
-
-test-integration:
-	@echo "=== libxml2 integration tests ==="
 	@test -f $(TEST_ELF) || { echo "  FAIL: $(TEST_ELF) not built"; exit 1; }
 	@size=$$(wc -c < $(TEST_ELF)); \
 	  if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(TEST_ELF) too small ($$size bytes)"; exit 1; fi
-	@echo "  OK: $(TEST_ELF) ($$size bytes)"
-	@echo "  PASS: libxml2 integration tests"
-
-test-functional:
-	@echo "=== libxml2 functional tests ==="
-	@test -f $(TEST_ELF) || { echo "  FAIL: $(TEST_ELF) not built"; exit 1; }
 	@echo "  Running $(TEST_ELF) via nanvixd.elf (platform=$(PLATFORM), mode=$(PROCESS_MODE))..."
 	@TMPDIR=$$(mktemp -d /tmp/nanvix-libxml2-XXXXXX) && \
 	  trap "rm -rf $$TMPDIR" EXIT && \
@@ -131,7 +119,7 @@ test-functional:
 	@echo "  PASS: $(TEST_ELF) (exit code 0)"
 	@echo "  PASS: libxml2 functional tests"
 
-test: test-smoke test-integration test-functional
+test: test-functional
 	@echo "=== All libxml2 tests PASSED ==="
 
 # ===========================================================================
@@ -174,4 +162,4 @@ clean:
 	rm -f $(TEST_ELF) Makefile
 	rm -rf dist/ .libs/
 
-.PHONY: all clean test test-smoke test-integration test-functional package verify-package
+.PHONY: all clean test test-functional package verify-package

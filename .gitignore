@@ -64,3 +64,7 @@ Makefile.in
 /py-compile
 /stamp-h1
 dist/
+
+# Nanvix
+nanvixd_*.log
+test_libxml2.elf
