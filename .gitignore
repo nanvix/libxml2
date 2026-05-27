@@ -64,3 +64,6 @@ Makefile.in
 /py-compile
 /stamp-h1
 dist/
+
+# Nanvix
+nanvixd_*.log
