@@ -6,11 +6,10 @@
 #    NANVIX_TOOLCHAIN=<toolchain> [target]
 #
 # Targets:
-#   all              Build libxml2.a and the test ELF
+#   all              Build libxml2.a and the test ELF, then stage via install
+#   install          Stage built artifacts into LIB_OUT/INCLUDE_OUT/TEST_OUT
 #   test             Run functional tests
 #   test-functional  Run the test ELF on nanvixd.elf
-#   package          Create a release tarball with libs, headers, xml2-config
-#   verify-package   Verify the contents of the release tarball
 #   clean            Remove build artifacts
 
 # ===========================================================================
@@ -19,8 +18,8 @@
 
 # Some assumptions:
 # 1. This makefile is expected to be invoked via z.py.
-# 2. Build goals require the cross-toolchain at $(NANVIX_TOOLCHAIN); other
-#    goals (test-*, package, verify-package, clean) are pure host-side.
+# 2. Build goals (all, install) require the cross-toolchain at
+#    $(NANVIX_TOOLCHAIN); other goals (test-*, clean) are pure host-side.
 # 3. Build ALWAYS runs before test and release.
 
 .DEFAULT_GOAL=all
@@ -30,11 +29,23 @@ STATICLIB := .libs/libxml2.a
 TEST_SRC  := .nanvix/test/test_libxml2.c
 TEST_ELF  := test_libxml2$(EXE)
 
-_NANVIX_DOCKER_BUILD_GOALS := all $(STATICLIB) $(TEST_ELF)
+_NANVIX_DOCKER_BUILD_GOALS := all install $(STATICLIB) $(TEST_ELF)
 _NANVIX_GOALS := $(or $(MAKECMDGOALS),$(.DEFAULT_GOAL))
 
 # Ensure required variables are defined.
-_REQUIRED := PLATFORM PROCESS_MODE MEMORY_SIZE NANVIX_HOME NANVIX_BUILDROOT NANVIX_TOOLCHAIN
+_REQUIRED := PLATFORM \
+    PROCESS_MODE \
+    MEMORY_SIZE \
+    NANVIX_HOME \
+    NANVIX_BUILDROOT \
+    NANVIX_TOOLCHAIN \
+    NANVIX_ROOT \
+    OUT_DIR \
+    DIST_DIR \
+    LIB_OUT \
+    INCLUDE_OUT \
+    BIN_OUT \
+    TEST_OUT
 ifneq ($(filter-out clean,$(_NANVIX_GOALS)),)
   $(foreach v,$(_REQUIRED),\
     $(if $($v),,$(error Required variable $v not set))\
@@ -65,7 +76,22 @@ endif
 # Build Targets
 # ===========================================================================
 
-all: $(STATICLIB) $(TEST_ELF)
+all: $(STATICLIB) $(TEST_ELF) install
+
+# Stage built artifacts into the release/test output tree so that
+# `./z release` (which packages release_dir()) can find them.
+install: $(STATICLIB) $(TEST_ELF)
+	@mkdir -p $(LIB_OUT) $(INCLUDE_OUT)/libxml2/libxml $(BIN_OUT) $(TEST_OUT)
+	cp -f $(STATICLIB)         $(LIB_OUT)/
+	cp -f include/libxml/*.h   $(INCLUDE_OUT)/libxml2/libxml/
+	cp -f $(TEST_ELF)          $(TEST_OUT)/
+	@echo '#!/bin/sh'                                                                             >  $(BIN_OUT)/xml2-config
+	@echo 'case "$$1" in'                                                                         >> $(BIN_OUT)/xml2-config
+	@echo '  --cflags) echo "-I$${NANVIX_HOME:-/mnt/sysroot}/include/libxml2" ;;'                 >> $(BIN_OUT)/xml2-config
+	@echo '  --libs)   echo "-L$${NANVIX_HOME:-/mnt/sysroot}/lib -lxml2 -lz" ;;'                  >> $(BIN_OUT)/xml2-config
+	@echo '  --version) echo "2.12.9" ;;'                                                         >> $(BIN_OUT)/xml2-config
+	@echo 'esac'                                                                                  >> $(BIN_OUT)/xml2-config
+	chmod +x $(BIN_OUT)/xml2-config
 
 $(STATICLIB):
 	sh -c '\
@@ -123,43 +149,12 @@ test: test-functional
 	@echo "=== All libxml2 tests PASSED ==="
 
 # ===========================================================================
-# Package Target
-# ===========================================================================
-
-package:
-	@echo "=== Packaging libxml2 release ==="
-	$(eval ARTIFACT_NAME := libxml2-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
-	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found; run 'build' first"; exit 1; }
-	rm -rf dist/$(ARTIFACT_NAME)
-	mkdir -p dist/$(ARTIFACT_NAME)/sysroot/lib \
-	         dist/$(ARTIFACT_NAME)/sysroot/include/libxml2/libxml \
-	         dist/$(ARTIFACT_NAME)/sysroot/bin
-	cp -f $(STATICLIB) dist/$(ARTIFACT_NAME)/sysroot/lib/
-	cp -f include/libxml/*.h dist/$(ARTIFACT_NAME)/sysroot/include/libxml2/libxml/
-	@echo '#!/bin/sh' > dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	@echo 'case "$$1" in' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	@echo '  --cflags) echo "-I$${NANVIX_HOME:-/mnt/sysroot}/include/libxml2" ;;' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	@echo '  --libs)   echo "-L$${NANVIX_HOME:-/mnt/sysroot}/lib -lxml2 -lz" ;;' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	@echo '  --version) echo "2.12.9" ;;' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	@echo 'esac' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	chmod +x dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
-	tar -czf dist/$(ARTIFACT_NAME).tar.gz -C dist/$(ARTIFACT_NAME) sysroot
-	@echo "  Package: dist/$(ARTIFACT_NAME).tar.gz"
-
-verify-package:
-	@echo "=== Verifying libxml2 package ==="
-	$(eval ARTIFACT_NAME := libxml2-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
-	@test -f "dist/$(ARTIFACT_NAME).tar.gz" || { echo "  FAIL: tarball not found"; exit 1; }
-	@tar tzf "dist/$(ARTIFACT_NAME).tar.gz" | grep -q 'sysroot/lib/libxml2.a' || { echo "  FAIL: missing libxml2.a"; exit 1; }
-	@echo "  PASS: libxml2 package verification"
-
-# ===========================================================================
 # Clean
 # ===========================================================================
 
 clean:
 	-$(MAKE) clean 2>/dev/null || true
 	rm -f $(TEST_ELF) Makefile
-	rm -rf dist/ .libs/
+	rm -rf $(OUT_DIR) dist/ .libs/
 
-.PHONY: all clean test test-functional package verify-package
+.PHONY: all install clean test test-functional
