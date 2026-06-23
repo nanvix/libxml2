@@ -1,7 +1,7 @@
 [package]
 name = "libxml2"
 version = "2.12.9"
-nanvix-version = "0.16.140"
+nanvix-version = "0.17.5"
 
 [builds]
 [builds.matrix]
