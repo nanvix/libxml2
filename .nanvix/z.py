@@ -284,7 +284,8 @@ class Libxml2Build(ZScript):
 
         test_allowlist = {"test_libxml2.elf"}
         test_binaries: list[Path] = []
-        for candidate in [repo_root(), repo_root() / "build"]:
+        # test_out() is the windows-test artifact overlay.
+        for candidate in [test_out(), repo_root(), repo_root() / "build"]:
             if candidate.is_dir():
                 for elf in sorted(candidate.glob("*.elf")):
                     if elf.name in test_allowlist and elf.name not in {
@@ -313,12 +314,10 @@ class Libxml2Build(ZScript):
             initrd: Path | None = None
             try:
                 if binary.resolve() != repo_elf.resolve():
-                    if repo_elf.exists():
-                        raise FileExistsError(
-                            f"refusing to clobber existing {repo_elf}"
-                        )
+                    # Don't clobber a dev's prior repo-root build.
+                    preexisted = repo_elf.exists()
                     shutil.copy2(binary, repo_elf)
-                    copied_elf = True
+                    copied_elf = not preexisted
                 initrd = make_initrd(self, binary.name, test=True)
                 with tempfile.TemporaryDirectory(prefix=f"nanvix_{name}_") as tmpdir:
                     tmpdir_path = Path(tmpdir)
