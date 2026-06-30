@@ -11,7 +11,6 @@ Usage:
     ./z clean     # Remove build artifacts
 """
 
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -57,7 +56,7 @@ class Libxml2Build(ZScript):
     # performance (especially on Windows), so anything not listed here
     # is discarded when the container exits.  Two categories:
     #   * legacy repo-root paths needed at runtime (test_libxml2.elf is
-    #     resolved by make_initrd via repo_root()/app);
+    #     read from repo_root() by the standalone test callsite below);
     #   * install-staged paths under .nanvix/out/ for `./z release`
     #     (see _staged_output_files()).
     _BUILD_OUTPUTS: tuple[str, ...] = ("test_libxml2.elf",)
@@ -214,7 +213,7 @@ class Libxml2Build(ZScript):
         mkramfs = sysroot_path / "bin" / "mkramfs.elf"
 
         # Bundle test_libxml2.elf + daemons into an initrd.
-        initrd = make_initrd(self, "test_libxml2.elf", test=True)
+        initrd = make_initrd(self, repo_root() / "test_libxml2.elf", test_out())
 
         try:
             with tempfile.TemporaryDirectory(prefix="nanvix_libxml2_") as tmpdir:
@@ -305,20 +304,9 @@ class Libxml2Build(ZScript):
         for binary in test_binaries:
             name = binary.stem
             print(f"RUN  {name}...")
-            # make_initrd resolves binaries relative to repo_root;
-            # copy the ELF there temporarily unless it already lives there.
-            # This is a constraint of the make_initrd API; cleanup is
-            # handled in the finally block below.
-            repo_elf = repo_root() / binary.name
-            copied_elf = False
             initrd: Path | None = None
             try:
-                if binary.resolve() != repo_elf.resolve():
-                    # Don't clobber a dev's prior repo-root build.
-                    preexisted = repo_elf.exists()
-                    shutil.copy2(binary, repo_elf)
-                    copied_elf = not preexisted
-                initrd = make_initrd(self, binary.name, test=True)
+                initrd = make_initrd(self, binary, test_out())
                 with tempfile.TemporaryDirectory(prefix=f"nanvix_{name}_") as tmpdir:
                     tmpdir_path = Path(tmpdir)
                     ramfs_dir = tmpdir_path / "ramfs"
@@ -354,14 +342,9 @@ class Libxml2Build(ZScript):
                         failed.append(name)
                         continue
                 print(f"OK   {name}")
-            except FileExistsError as e:
-                print(f"FAIL {name} ({e})")
-                failed.append(name)
             finally:
                 if initrd is not None and initrd.exists():
                     initrd.unlink()
-                if copied_elf and repo_elf.exists():
-                    repo_elf.unlink()
 
         if failed:
             msg = " ".join(failed)
