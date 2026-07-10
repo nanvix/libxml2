@@ -6,11 +6,19 @@
 #    NANVIX_TOOLCHAIN=<toolchain> [target]
 #
 # Targets:
-#   all              Build libxml2.a and the test ELF, then stage via install
-#   install          Stage built artifacts into LIB_OUT/INCLUDE_OUT/TEST_OUT
+#   all              Build libxml2.a, libxml2.so, and the test ELFs
 #   test             Run functional tests
-#   test-functional  Run the test ELF on nanvixd.elf
+#   test-functional  Run the test ELFs on nanvixd.elf
+#   package          Create a release tarball with libs, headers, xml2-config
+#   verify-package   Verify the contents of the release tarball
 #   clean            Remove build artifacts
+#
+# Dependencies:
+#   This shared-library build requires the Nanvix dynamic loader to honour
+#   `.init_array` constructors and `DT_RUNPATH` lookups, both shipped in
+#   esaurez/nanvix#27 ([syscall] E: Run dlopen ctors/dtors and DT_RUNPATH).
+#   Without that change, the .so still loads but library constructors do
+#   not run and DT_NEEDED entries must all live in `lib/`.
 
 # ===========================================================================
 # Global Variables
@@ -18,34 +26,23 @@
 
 # Some assumptions:
 # 1. This makefile is expected to be invoked via z.py.
-# 2. Build goals (all, install) require the cross-toolchain at
-#    $(NANVIX_TOOLCHAIN); other goals (test-*, clean) are pure host-side.
+# 2. Build goals require the cross-toolchain at $(NANVIX_TOOLCHAIN); other
+#    goals (test-*, package, verify-package, clean) are pure host-side.
 # 3. Build ALWAYS runs before test and release.
 
 .DEFAULT_GOAL=all
 EXE = .elf
 
 STATICLIB := .libs/libxml2.a
+SHAREDLIB := .libs/libxml2.so
 TEST_SRC  := .nanvix/test/test_libxml2.c
 TEST_ELF  := test_libxml2$(EXE)
 
-_NANVIX_DOCKER_BUILD_GOALS := all install $(STATICLIB) $(TEST_ELF)
+_NANVIX_DOCKER_BUILD_GOALS := all $(STATICLIB) $(SHAREDLIB) $(TEST_ELF)
 _NANVIX_GOALS := $(or $(MAKECMDGOALS),$(.DEFAULT_GOAL))
 
 # Ensure required variables are defined.
-_REQUIRED := PLATFORM \
-    PROCESS_MODE \
-    MEMORY_SIZE \
-    NANVIX_HOME \
-    NANVIX_BUILDROOT \
-    NANVIX_TOOLCHAIN \
-    NANVIX_ROOT \
-    OUT_DIR \
-    DIST_DIR \
-    LIB_OUT \
-    INCLUDE_OUT \
-    BIN_OUT \
-    TEST_OUT
+_REQUIRED := PLATFORM PROCESS_MODE MEMORY_SIZE NANVIX_HOME NANVIX_BUILDROOT NANVIX_TOOLCHAIN
 ifneq ($(filter-out clean,$(_NANVIX_GOALS)),)
   $(foreach v,$(_REQUIRED),\
     $(if $($v),,$(error Required variable $v not set))\
@@ -76,23 +73,12 @@ endif
 # Build Targets
 # ===========================================================================
 
-all: $(STATICLIB) $(TEST_ELF) install
+all: $(STATICLIB) $(SHAREDLIB) $(TEST_ELF)
 
-# Stage built artifacts into the release/test output tree so that
-# `./z release` (which packages release_dir()) can find them.
-install: $(STATICLIB) $(TEST_ELF)
-	@mkdir -p $(LIB_OUT) $(INCLUDE_OUT)/libxml2/libxml $(BIN_OUT) $(TEST_OUT)
-	cp -f $(STATICLIB)         $(LIB_OUT)/
-	cp -f include/libxml/*.h   $(INCLUDE_OUT)/libxml2/libxml/
-	cp -f $(TEST_ELF)          $(TEST_OUT)/
-	@echo '#!/bin/sh'                                                                             >  $(BIN_OUT)/xml2-config
-	@echo 'case "$$1" in'                                                                         >> $(BIN_OUT)/xml2-config
-	@echo '  --cflags) echo "-I$${NANVIX_HOME:-/mnt/sysroot}/include/libxml2" ;;'                 >> $(BIN_OUT)/xml2-config
-	@echo '  --libs)   echo "-L$${NANVIX_HOME:-/mnt/sysroot}/lib -lxml2 -lz" ;;'                  >> $(BIN_OUT)/xml2-config
-	@echo '  --version) echo "2.12.9" ;;'                                                         >> $(BIN_OUT)/xml2-config
-	@echo 'esac'                                                                                  >> $(BIN_OUT)/xml2-config
-	chmod +x $(BIN_OUT)/xml2-config
-
+# Build the static archive with -fPIC so the same objects can be
+# linked into a position-independent .so below. autotools' libtool
+# shared-library detection does not know about i686-nanvix, so we
+# keep --disable-shared and link the .so ourselves from the .a.
 $(STATICLIB):
 	sh -c '\
 	  export PATH="$(NANVIX_TOOLCHAIN)/bin:$$PATH" && \
@@ -102,11 +88,36 @@ $(STATICLIB):
 	    --without-python --without-threads --without-http --without-ftp \
 	    --without-lzma --without-debug --without-catalog --without-readline \
 	    --without-history --without-modules \
+	    --with-pic \
 	    --with-zlib="$(BUILDROOT_PATH)" \
-	    CFLAGS="-I$(BUILDROOT_PATH)/include" \
+	    CFLAGS="-I$(BUILDROOT_PATH)/include -fPIC" \
 	    LDFLAGS="-L$(BUILDROOT_PATH)/lib" && \
 	  make -j$(NPROC) libxml2.la'
 
+# Link a shared library from the PIC objects bundled in libxml2.a.
+# zlib is also embedded via --whole-archive so libxml2.so is
+# self-contained (the alternative would be a separate libz.so, which
+# Nanvix does not currently ship). libposix / libc / libm symbols are
+# left unresolved and bound at dlopen time against the main exe's
+# .dynsym, matching how cpython extension .so files work today.
+$(SHAREDLIB): $(STATICLIB)
+	sh -c '\
+	  export PATH="$(NANVIX_TOOLCHAIN)/bin:$$PATH" && \
+	  i686-nanvix-gcc -shared -fPIC -nostdlib \
+	    -Wl,-soname,libxml2.so -Wl,-z,noexecstack \
+	    -Wl,--whole-archive \
+	      $(STATICLIB) \
+	      $(BUILDROOT_PATH)/lib/libz.a \
+	    -Wl,--no-whole-archive \
+	    -o $(SHAREDLIB)'
+
+# Test ELF stays statically linked against the .a so a regression in
+# the shared-link path does not mask a real libxml2 functional bug.
+# End-to-end validation of libxml2.so (loading via dlopen with the
+# correct libc symbols exposed by the host binary) is performed by the
+# downstream nanvix/lxml consumer; reproducing the same setup here
+# would require an unmerged libposix-visibility fix and substantial
+# linker-script work.
 $(TEST_ELF): $(TEST_SRC)
 	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found; run 'build' first"; exit 1; }
 	$(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc \
@@ -133,6 +144,17 @@ test-functional:
 	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found"; exit 1; }
 	@size=$$(wc -c < $(STATICLIB)); \
 	  if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(STATICLIB) too small ($$size bytes)"; exit 1; fi
+	@test -f $(SHAREDLIB) || { echo "  FAIL: $(SHAREDLIB) not found"; exit 1; }
+	@size=$$(wc -c < $(SHAREDLIB)); \
+	  if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(SHAREDLIB) too small ($$size bytes)"; exit 1; fi
+	@echo "  Verifying $(SHAREDLIB) has the expected DT_SONAME..."
+	@$(NANVIX_TOOLCHAIN)/bin/i686-nanvix-readelf -d $(SHAREDLIB) | grep -q 'SONAME.*libxml2.so' \
+	  || { echo "  FAIL: SONAME=libxml2.so not set on $(SHAREDLIB)"; exit 1; }
+	@echo "  Verifying $(SHAREDLIB) exports the public libxml2 API..."
+	@$(NANVIX_TOOLCHAIN)/bin/i686-nanvix-nm -D $(SHAREDLIB) | grep -q 'T xmlInitParser' \
+	  || { echo "  FAIL: xmlInitParser missing from $(SHAREDLIB) .dynsym"; exit 1; }
+	@$(NANVIX_TOOLCHAIN)/bin/i686-nanvix-nm -D $(SHAREDLIB) | grep -q 'T xmlParseMemory' \
+	  || { echo "  FAIL: xmlParseMemory missing from $(SHAREDLIB) .dynsym"; exit 1; }
 	@test -f $(TEST_ELF) || { echo "  FAIL: $(TEST_ELF) not built"; exit 1; }
 	@size=$$(wc -c < $(TEST_ELF)); \
 	  if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(TEST_ELF) too small ($$size bytes)"; exit 1; fi
@@ -151,12 +173,46 @@ test: test-functional
 	@echo "=== All libxml2 tests PASSED ==="
 
 # ===========================================================================
+# Package Target
+# ===========================================================================
+
+package:
+	@echo "=== Packaging libxml2 release ==="
+	$(eval ARTIFACT_NAME := libxml2-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
+	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found; run 'build' first"; exit 1; }
+	@test -f $(SHAREDLIB) || { echo "  FAIL: $(SHAREDLIB) not found; run 'build' first"; exit 1; }
+	rm -rf dist/$(ARTIFACT_NAME)
+	mkdir -p dist/$(ARTIFACT_NAME)/sysroot/lib \
+	         dist/$(ARTIFACT_NAME)/sysroot/include/libxml2/libxml \
+	         dist/$(ARTIFACT_NAME)/sysroot/bin
+	cp -f $(STATICLIB) dist/$(ARTIFACT_NAME)/sysroot/lib/
+	cp -f $(SHAREDLIB) dist/$(ARTIFACT_NAME)/sysroot/lib/
+	cp -f include/libxml/*.h dist/$(ARTIFACT_NAME)/sysroot/include/libxml2/libxml/
+	@echo '#!/bin/sh' > dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
+	@echo 'case "$$1" in' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
+	@echo '  --cflags) echo "-I$${NANVIX_HOME:-/mnt/sysroot}/include/libxml2" ;;' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
+	@echo '  --libs)   echo "-L$${NANVIX_HOME:-/mnt/sysroot}/lib -lxml2 -lz" ;;' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
+	@echo '  --version) echo "2.12.9" ;;' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
+	@echo 'esac' >> dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
+	chmod +x dist/$(ARTIFACT_NAME)/sysroot/bin/xml2-config
+	tar -czf dist/$(ARTIFACT_NAME).tar.gz -C dist/$(ARTIFACT_NAME) sysroot
+	@echo "  Package: dist/$(ARTIFACT_NAME).tar.gz"
+
+verify-package:
+	@echo "=== Verifying libxml2 package ==="
+	$(eval ARTIFACT_NAME := libxml2-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
+	@test -f "dist/$(ARTIFACT_NAME).tar.gz" || { echo "  FAIL: tarball not found"; exit 1; }
+	@tar tzf "dist/$(ARTIFACT_NAME).tar.gz" | grep -q 'sysroot/lib/libxml2.a' || { echo "  FAIL: missing libxml2.a"; exit 1; }
+	@tar tzf "dist/$(ARTIFACT_NAME).tar.gz" | grep -q 'sysroot/lib/libxml2.so' || { echo "  FAIL: missing libxml2.so"; exit 1; }
+	@echo "  PASS: libxml2 package verification"
+
+# ===========================================================================
 # Clean
 # ===========================================================================
 
 clean:
 	-$(MAKE) clean 2>/dev/null || true
 	rm -f $(TEST_ELF) Makefile
-	rm -rf $(OUT_DIR) dist/ .libs/
+	rm -rf dist/ .libs/
 
-.PHONY: all install clean test test-functional
+.PHONY: all clean test test-functional package verify-package

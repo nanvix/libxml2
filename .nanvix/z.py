@@ -59,7 +59,7 @@ class Libxml2Build(ZScript):
     #     read from repo_root() by the standalone test callsite below);
     #   * install-staged paths under .nanvix/out/ for `./z release`
     #     (see _staged_output_files()).
-    _BUILD_OUTPUTS: tuple[str, ...] = ("test_libxml2.elf",)
+    _BUILD_OUTPUTS: tuple[str, ...] = (".libs/libxml2.so", "test_libxml2.elf",)
 
     def _staged_output_files(self) -> list[str]:
         """Return install-staged artifact paths (relative to repo_root())
@@ -68,6 +68,7 @@ class Libxml2Build(ZScript):
         root = repo_root()
         return [
             str((lib_out() / "libxml2.a").relative_to(root)),
+            str((lib_out() / "libxml2.so").relative_to(root)),
             str(
                 (include_out() / "libxml2" / "libxml" / "xmlversion.h").relative_to(
                     root
@@ -134,7 +135,7 @@ class Libxml2Build(ZScript):
         return args
 
     def build(self) -> None:
-        """Cross-compile libxml2.a for Nanvix."""
+        """Cross-compile libxml2.a + libxml2.so for Nanvix."""
         run(*self._make_args("all"), cwd=repo_root(), docker=self.docker)
 
     # Test targets accepted by `./z test` on paths that bypass the
