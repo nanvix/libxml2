@@ -171,15 +171,8 @@ class Libxml2Build(ZScript):
             self._run_tests_windows()
             return
 
-        if self.config.deployment_mode == "standalone":
-            self._validate_test_targets()
-            self._run_functional_standalone()
-        else:
-            targets = self.targets if self.targets else ["test"]
-            run(
-                *self._make_args(*targets),
-                cwd=repo_root(),
-            )
+        self._validate_test_targets()
+        self._run_functional_standalone()
 
     def _get_sysroot(self) -> str:
         """Return the sysroot path or fatal if unset."""
@@ -254,17 +247,9 @@ class Libxml2Build(ZScript):
     def _run_tests_windows(self) -> None:
         """Run tests natively on Windows.
 
-        Only standalone mode is tested on Windows; multi-process and
-        single-process require linuxd, which is Linux-only. Uses
-        make_initrd to bundle each test binary with system daemons,
+        Uses make_initrd to bundle each test binary with system daemons,
         and a ramfs providing /tmp for any test I/O.
         """
-        if self.config.deployment_mode != "standalone":
-            print(
-                f"Skipping tests on Windows for mode '{self.config.deployment_mode}' (requires linuxd)."
-            )
-            return
-
         sysroot_path = Path(self._get_sysroot())
         nanvixd = sysroot_path / "bin" / "nanvixd.exe"
         mkramfs = sysroot_path / "bin" / "mkramfs.exe"
