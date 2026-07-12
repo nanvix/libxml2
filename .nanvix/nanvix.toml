@@ -1,11 +1,11 @@
 [package]
 name = "libxml2"
 version = "2.12.9"
-nanvix-version = "0.17.84"
+nanvix-version = "0.20.0"
 
 [builds]
 [builds.matrix]
-platforms = ["hyperlight", "microvm"]
+platforms = ["microvm"]
 modes = ["standalone"]
 memory = ["256mb"]
 

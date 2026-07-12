@@ -18,7 +18,7 @@
 
 # Some assumptions:
 # 1. This makefile is expected to be invoked via z.py.
-# 2. Build goals (all, install) require the cross-toolchain at
+# 2. Build goals (all, install) require the Nanvix SDK at
 #    $(NANVIX_TOOLCHAIN); other goals (test-*, clean) are pure host-side.
 # 3. Build ALWAYS runs before test and release.
 
@@ -67,10 +67,19 @@ ifneq ($(_BUILD),)
     $(error Cannot mix build and non-build targets. Build targets: $(_NANVIX_DOCKER_BUILD_GOALS))
   endif
 
-  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc),)
-    $(error Nanvix toolchain not found at $(NANVIX_TOOLCHAIN))
+  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/nanvix-sdk.json),)
+    $(error Nanvix SDK not found at $(NANVIX_TOOLCHAIN))
+  endif
+  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/clang),)
+    $(error Nanvix SDK Clang not found at $(NANVIX_TOOLCHAIN)/bin/clang)
   endif
 endif
+
+CC     := $(NANVIX_TOOLCHAIN)/bin/clang
+AR     := $(NANVIX_TOOLCHAIN)/bin/llvm-ar
+RANLIB := $(NANVIX_TOOLCHAIN)/bin/llvm-ranlib
+NM     := $(NANVIX_TOOLCHAIN)/bin/llvm-nm
+STRIP  := $(NANVIX_TOOLCHAIN)/bin/llvm-strip
 
 # ===========================================================================
 # Build Targets
@@ -81,47 +90,53 @@ all: $(STATICLIB) $(TEST_ELF) install
 # Stage built artifacts into the release/test output tree so that
 # `./z release` (which packages release_dir()) can find them.
 install: $(STATICLIB) $(TEST_ELF)
-	@mkdir -p $(LIB_OUT) $(INCLUDE_OUT)/libxml2/libxml $(BIN_OUT) $(TEST_OUT)
+	@mkdir -p $(LIB_OUT)/pkgconfig $(INCLUDE_OUT)/libxml2/libxml $(BIN_OUT) $(TEST_OUT)
 	cp -f $(STATICLIB)         $(LIB_OUT)/
 	cp -f include/libxml/*.h   $(INCLUDE_OUT)/libxml2/libxml/
 	cp -f $(TEST_ELF)          $(TEST_OUT)/
-	@echo '#!/bin/sh'                                                                             >  $(BIN_OUT)/xml2-config
-	@echo 'case "$$1" in'                                                                         >> $(BIN_OUT)/xml2-config
-	@echo '  --cflags) echo "-I$${NANVIX_HOME:-/mnt/sysroot}/include/libxml2" ;;'                 >> $(BIN_OUT)/xml2-config
-	@echo '  --libs)   echo "-L$${NANVIX_HOME:-/mnt/sysroot}/lib -lxml2 -lz" ;;'                  >> $(BIN_OUT)/xml2-config
-	@echo '  --version) echo "2.12.9" ;;'                                                         >> $(BIN_OUT)/xml2-config
-	@echo 'esac'                                                                                  >> $(BIN_OUT)/xml2-config
+	@echo '#!/bin/sh'                                                               >  $(BIN_OUT)/xml2-config
+	@echo 'prefix=$$(CDPATH= cd -- "$$(dirname -- "$$0")/.." && pwd)'              >> $(BIN_OUT)/xml2-config
+	@echo 'case "$$1" in'                                                           >> $(BIN_OUT)/xml2-config
+	@echo '  --cflags) echo "-I$$prefix/include/libxml2" ;;'                        >> $(BIN_OUT)/xml2-config
+	@echo '  --libs)   echo "-L$$prefix/lib -lxml2 -lz" ;;'                         >> $(BIN_OUT)/xml2-config
+	@echo '  --version) echo "2.12.9" ;;'                                           >> $(BIN_OUT)/xml2-config
+	@echo 'esac'                                                                    >> $(BIN_OUT)/xml2-config
 	chmod +x $(BIN_OUT)/xml2-config
+	@echo 'prefix=$${pcfiledir}/../..'                                               >  $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo 'libdir=$${prefix}/lib'                                                   >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo 'includedir=$${prefix}/include'                                           >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo                                                                          >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo 'Name: libXML'                                                           >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo 'Version: 2.12.9'                                                        >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo 'Description: libXML library version2.'                                  >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo 'Libs: -L$${libdir} -lxml2 -lz'                                          >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
+	@echo 'Cflags: -I$${includedir}/libxml2'                                       >> $(LIB_OUT)/pkgconfig/libxml-2.0.pc
 
 $(STATICLIB):
 	sh -c '\
 	  export PATH="$(NANVIX_TOOLCHAIN)/bin:$$PATH" && \
 	  ./configure --host=i686-nanvix \
-	    --prefix=/usr/local \
+	    --prefix="$(BUILDROOT_PATH)" \
 	    --enable-static --disable-shared --disable-maintainer-mode \
 	    --without-python --without-threads --without-http --without-ftp \
 	    --without-lzma --without-debug --without-catalog --without-readline \
 	    --without-history --without-modules \
 	    --with-zlib="$(BUILDROOT_PATH)" \
+	    CC="$(CC)" AR="$(AR)" RANLIB="$(RANLIB)" NM="$(NM)" STRIP="$(STRIP)" \
 	    CFLAGS="-I$(BUILDROOT_PATH)/include" \
-	    LDFLAGS="-L$(BUILDROOT_PATH)/lib" && \
+	    LDFLAGS="-L$(BUILDROOT_PATH)/lib" \
+	    Z_CFLAGS="-I$(BUILDROOT_PATH)/include" \
+	    Z_LIBS="-L$(BUILDROOT_PATH)/lib -lz" && \
 	  make -j$(NPROC) libxml2.la'
 
 $(TEST_ELF): $(TEST_SRC)
 	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found; run 'build' first"; exit 1; }
-	$(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc \
+	$(CC) \
 	  -Iinclude -Iinclude/libxml \
 	  $(TEST_SRC) \
-	  -L.libs -L$(BUILDROOT_PATH)/lib -L$(SYSROOT_PATH)/lib \
-	  -T$(SYSROOT_PATH)/lib/user.ld -static -Wl,-z,noexecstack \
-	  -Wl,--allow-multiple-definition \
+	  -L.libs -L$(BUILDROOT_PATH)/lib \
+	  -Wl,-z,noexecstack \
 	  -lxml2 -lz \
-	  -Wl,--start-group \
-	  $(SYSROOT_PATH)/lib/libnvx_crt0.a \
-	  $(SYSROOT_PATH)/lib/libposix.a \
-	  $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a \
-	  $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a \
-	  -Wl,--end-group \
 	  -o $@
 
 # ===========================================================================
