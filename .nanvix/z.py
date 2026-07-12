@@ -39,6 +39,12 @@ from nanvix_zutil.paths import (
 
 IS_WINDOWS = sys.platform == "win32"
 
+#: Docker image for cross-compiling Nanvix targets.
+NANVIX_DOCKER_IMAGE = (
+    "ghcr.io/nanvix/nanvix-sdk-c-clang"
+    "@sha256:f61737cb0780e6a2058c6d0bdf8ae5562db18de437173b2bcbbe6973abd3689f"
+)
+
 _MAKE_VAR_HOME = "NANVIX_HOME"
 _MAKE_VAR_BUILDROOT = "NANVIX_BUILDROOT"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
@@ -50,6 +56,19 @@ _MAKE_VAR_MEMORY_SIZE = "MEMORY_SIZE"
 class Libxml2Build(ZScript):
     """Build script for nanvix/libxml2."""
 
+    # Build-time headers, libraries, startup objects, and linker scripts come
+    # from the SDK and buildroot. The downloaded sysroot is runtime-only.
+    SYSROOT_REQUIRED_FILES = (
+        "bin/nanvixd.elf",
+        "bin/kernel.elf",
+        "bin/mkramfs.elf",
+    )
+    SYSROOT_REQUIRED_FILES_WINDOWS = (
+        "bin/nanvixd.exe",
+        "bin/kernel.elf",
+        "bin/mkramfs.exe",
+    )
+
     # Files produced by the cross-compile step that must be copied back
     # from the container's build directory into the host workspace. The
     # zutils Docker wrapper builds in a container-local scratch dir for
@@ -60,6 +79,10 @@ class Libxml2Build(ZScript):
     #   * install-staged paths under .nanvix/out/ for `./z release`
     #     (see _staged_output_files()).
     _BUILD_OUTPUTS: tuple[str, ...] = ("test_libxml2.elf",)
+
+    def docker_image(self) -> str:
+        """Return the default Docker image for cross-compilation."""
+        return NANVIX_DOCKER_IMAGE
 
     def _staged_output_files(self) -> list[str]:
         """Return install-staged artifact paths (relative to repo_root())
@@ -74,6 +97,7 @@ class Libxml2Build(ZScript):
                 )
             ),
             str((bin_out() / "xml2-config").relative_to(root)),
+            str((lib_out() / "pkgconfig" / "libxml-2.0.pc").relative_to(root)),
             str((test_out() / "test_libxml2.elf").relative_to(root)),
         ]
 
@@ -99,12 +123,15 @@ class Libxml2Build(ZScript):
         def translate(p: Path):
             return self.docker.translate_path(p) if self.docker else p
 
-        # Buildroot contains dependency libraries (zlib).
+        # Buildroot contains build-time dependency headers and libraries.
         buildroot_dir = buildroot()
-        if buildroot_dir.is_dir():
-            buildroot_p = translate(buildroot_dir)
-        else:
-            buildroot_p = sysroot_p
+        if not buildroot_dir.is_dir():
+            log.fatal(
+                "Nanvix buildroot not found.",
+                code=EXIT_MISSING_DEP,
+                hint="Run `./z setup` first to install build dependencies.",
+            )
+        buildroot_p = translate(buildroot_dir)
 
         args = [
             "make",
