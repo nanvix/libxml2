@@ -39,12 +39,6 @@ from nanvix_zutil.paths import (
 
 IS_WINDOWS = sys.platform == "win32"
 
-#: Docker image for cross-compiling Nanvix targets.
-NANVIX_DOCKER_IMAGE = (
-    "ghcr.io/nanvix/nanvix-sdk-c-clang"
-    "@sha256:f61737cb0780e6a2058c6d0bdf8ae5562db18de437173b2bcbbe6973abd3689f"
-)
-
 _MAKE_VAR_HOME = "NANVIX_HOME"
 _MAKE_VAR_BUILDROOT = "NANVIX_BUILDROOT"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
@@ -79,10 +73,6 @@ class Libxml2Build(ZScript):
     #   * install-staged paths under .nanvix/out/ for `./z release`
     #     (see _staged_output_files()).
     _BUILD_OUTPUTS: tuple[str, ...] = ("test_libxml2.elf",)
-
-    def docker_image(self) -> str:
-        """Return the default Docker image for cross-compilation."""
-        return NANVIX_DOCKER_IMAGE
 
     def _staged_output_files(self) -> list[str]:
         """Return install-staged artifact paths (relative to repo_root())
