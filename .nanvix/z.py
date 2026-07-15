@@ -26,13 +26,12 @@ from nanvix_zutil import (
     run,
 )
 from nanvix_zutil.paths import (
-    bin_out,
     buildroot,
+    dev_out,
     dist_dir,
-    include_out,
-    lib_out,
     nanvix_root,
     out_dir,
+    regular_out,
     repo_root,
     test_out,
 )
@@ -80,14 +79,14 @@ class Libxml2Build(ZScript):
         """
         root = repo_root()
         return [
-            str((lib_out() / "libxml2.a").relative_to(root)),
+            str((dev_out() / "lib" / "libxml2.a").relative_to(root)),
             str(
-                (include_out() / "libxml2" / "libxml" / "xmlversion.h").relative_to(
-                    root
-                )
+                (
+                    dev_out() / "include" / "libxml2" / "libxml" / "xmlversion.h"
+                ).relative_to(root)
             ),
-            str((bin_out() / "xml2-config").relative_to(root)),
-            str((lib_out() / "pkgconfig" / "libxml-2.0.pc").relative_to(root)),
+            str((regular_out() / "bin" / "xml2-config").relative_to(root)),
+            str((dev_out() / "lib" / "pkgconfig" / "libxml-2.0.pc").relative_to(root)),
             str((test_out() / "test_libxml2.elf").relative_to(root)),
         ]
 
@@ -140,9 +139,9 @@ class Libxml2Build(ZScript):
                 f"NANVIX_ROOT={translate(nanvix_root())}",
                 f"OUT_DIR={translate(out_dir())}",
                 f"DIST_DIR={translate(dist_dir())}",
-                f"LIB_OUT={translate(lib_out())}",
-                f"INCLUDE_OUT={translate(include_out())}",
-                f"BIN_OUT={translate(bin_out())}",
+                f"LIB_OUT={translate(dev_out() / 'lib')}",
+                f"INCLUDE_OUT={translate(dev_out() / 'include')}",
+                f"BIN_OUT={translate(regular_out() / 'bin')}",
                 f"TEST_OUT={translate(test_out())}",
             ]
         )
