@@ -222,7 +222,7 @@ class Libxml2Build(ZScript):
         mkramfs = sysroot_path / "bin" / "mkramfs.elf"
 
         # Bundle test_libxml2.elf + daemons into an initrd.
-        initrd = make_initrd(self, repo_root() / "test_libxml2.elf", test_out())
+        initrd = make_initrd(repo_root() / "test_libxml2.elf", test_out())
 
         try:
             with tempfile.TemporaryDirectory(prefix="nanvix_libxml2_") as tmpdir:
@@ -307,7 +307,7 @@ class Libxml2Build(ZScript):
             print(f"RUN  {name}...")
             initrd: Path | None = None
             try:
-                initrd = make_initrd(self, binary, test_out())
+                initrd = make_initrd(binary, test_out())
                 with tempfile.TemporaryDirectory(prefix=f"nanvix_{name}_") as tmpdir:
                     tmpdir_path = Path(tmpdir)
                     ramfs_dir = tmpdir_path / "ramfs"
