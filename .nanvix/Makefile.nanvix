@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 #
 # Usage: make -f .nanvix/Makefile.nanvix PLATFORM=<platform> PROCESS_MODE=<mode> \
-#    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_BUILDROOT=<buildroot> \
+#    MEMORY_SIZE=<size> NANVIX_HOME=<home> \
 #    NANVIX_TOOLCHAIN=<toolchain> [target]
 #
 # Targets:
@@ -37,7 +37,6 @@ _REQUIRED := PLATFORM \
     PROCESS_MODE \
     MEMORY_SIZE \
     NANVIX_HOME \
-    NANVIX_BUILDROOT \
     NANVIX_TOOLCHAIN \
     NANVIX_ROOT \
     OUT_DIR \
@@ -53,7 +52,6 @@ ifneq ($(filter-out clean,$(_NANVIX_GOALS)),)
 endif
 
 SYSROOT_PATH   := $(abspath $(NANVIX_HOME))
-BUILDROOT_PATH := $(abspath $(NANVIX_BUILDROOT))
 NPROC := $(shell nproc 2>/dev/null || echo 4)
 
 # ===========================================================================
@@ -116,17 +114,17 @@ $(STATICLIB):
 	sh -c '\
 	  export PATH="$(NANVIX_TOOLCHAIN)/bin:$$PATH" && \
 	  ./configure --host=i686-nanvix \
-	    --prefix="$(BUILDROOT_PATH)" \
+	    --prefix="$(SYSROOT_PATH)" \
 	    --enable-static --disable-shared --disable-maintainer-mode \
 	    --without-python --without-threads --without-http --without-ftp \
 	    --without-lzma --without-debug --without-catalog --without-readline \
 	    --without-history --without-modules \
-	    --with-zlib="$(BUILDROOT_PATH)" \
+	    --with-zlib="$(SYSROOT_PATH)" \
 	    CC="$(CC)" AR="$(AR)" RANLIB="$(RANLIB)" NM="$(NM)" STRIP="$(STRIP)" \
-	    CFLAGS="-I$(BUILDROOT_PATH)/include" \
-	    LDFLAGS="-L$(BUILDROOT_PATH)/lib" \
-	    Z_CFLAGS="-I$(BUILDROOT_PATH)/include" \
-	    Z_LIBS="-L$(BUILDROOT_PATH)/lib -lz" && \
+	    CFLAGS="-I$(SYSROOT_PATH)/include" \
+	    LDFLAGS="-L$(SYSROOT_PATH)/lib" \
+	    Z_CFLAGS="-I$(SYSROOT_PATH)/include" \
+	    Z_LIBS="-L$(SYSROOT_PATH)/lib -lz" && \
 	  make -j$(NPROC) libxml2.la'
 
 $(TEST_ELF): $(TEST_SRC)
@@ -134,7 +132,7 @@ $(TEST_ELF): $(TEST_SRC)
 	$(CC) \
 	  -Iinclude -Iinclude/libxml \
 	  $(TEST_SRC) \
-	  -L.libs -L$(BUILDROOT_PATH)/lib \
+	  -L.libs -L$(SYSROOT_PATH)/lib \
 	  -Wl,-z,noexecstack \
 	  -lxml2 -lz \
 	  -o $@

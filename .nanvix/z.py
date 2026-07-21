@@ -26,7 +26,6 @@ from nanvix_zutil import (
     run,
 )
 from nanvix_zutil.paths import (
-    buildroot,
     dev_out,
     dist_dir,
     nanvix_root,
@@ -39,7 +38,6 @@ from nanvix_zutil.paths import (
 IS_WINDOWS = sys.platform == "win32"
 
 _MAKE_VAR_HOME = "NANVIX_HOME"
-_MAKE_VAR_BUILDROOT = "NANVIX_BUILDROOT"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
 _MAKE_VAR_PLATFORM = "PLATFORM"
 _MAKE_VAR_PROCESS_MODE = "PROCESS_MODE"
@@ -50,7 +48,7 @@ class Libxml2Build(ZScript):
     """Build script for nanvix/libxml2."""
 
     # Build-time headers, libraries, startup objects, and linker scripts come
-    # from the SDK and buildroot. The downloaded sysroot is runtime-only.
+    # from the SDK and sysroot.
     SYSROOT_REQUIRED_FILES = (
         "bin/nanvixd.elf",
         "bin/kernel.elf",
@@ -112,22 +110,11 @@ class Libxml2Build(ZScript):
         def translate(p: Path):
             return self.docker.translate_path(p) if self.docker else p
 
-        # Buildroot contains build-time dependency headers and libraries.
-        buildroot_dir = buildroot()
-        if not buildroot_dir.is_dir():
-            log.fatal(
-                "Nanvix buildroot not found.",
-                code=EXIT_MISSING_DEP,
-                hint="Run `./z setup` first to install build dependencies.",
-            )
-        buildroot_p = translate(buildroot_dir)
-
         args = [
             "make",
             "-f",
             ".nanvix/Makefile.nanvix",
             f"{_MAKE_VAR_HOME}={sysroot_p}",
-            f"{_MAKE_VAR_BUILDROOT}={buildroot_p}",
             f"{_MAKE_VAR_TOOLCHAIN}={toolchain_p}",
         ]
 
