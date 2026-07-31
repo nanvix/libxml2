@@ -89,12 +89,7 @@ class Libxml2Build(ZScript):
             str((test_out() / "test_libxml2.elf").relative_to(root)),
         ]
 
-    def docker_config(self, image: str) -> DockerConfig:
-        cfg = super().docker_config(image)
-        cfg.output_files = list(self._BUILD_OUTPUTS) + self._staged_output_files()
-        return cfg
-
-    def _make_args(self, *targets: str) -> list[str]:
+    def _make_args(self, docker: DockerConfig | None, *targets: str) -> list[str]:
         """Build the common make argument list."""
         sysroot = self.config.get(CFG_SYSROOT, "")
         if not sysroot:
@@ -105,13 +100,11 @@ class Libxml2Build(ZScript):
             )
         toolchain_p = str(TOOLCHAIN_CONTAINER_PATH)
         sysroot_p = (
-            translate_path(self.docker.mounts, Path(sysroot))
-            if self.docker
-            else Path(sysroot)
+            translate_path(docker.mounts, Path(sysroot)) if docker else Path(sysroot)
         )
 
         def translate(p: Path):
-            return translate_path(self.docker.mounts, p) if self.docker else p
+            return translate_path(docker.mounts, p) if docker else p
 
         args = [
             "make",
@@ -139,9 +132,10 @@ class Libxml2Build(ZScript):
         args.extend(targets)
         return args
 
-    def build(self) -> None:
+    def build(self, docker: DockerConfig) -> None:
         """Cross-compile libxml2.a for Nanvix."""
-        run(*self._make_args("all"), cwd=repo_root(), docker=self.docker)
+        docker.output_files = list(self._BUILD_OUTPUTS) + self._staged_output_files()
+        run(*self._make_args(docker, "all"), cwd=repo_root(), docker=docker)
 
     # Test targets accepted by `./z test` on paths that bypass the
     # Makefile (Windows and standalone Linux). Both aliases run the same
