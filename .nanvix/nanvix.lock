@@ -2,7 +2,7 @@
 
 [metadata]
 manifest-hash = "sha256:44e1f43b189e7749a0ccb916f78aff7692943e70a79f2b5b11ee2436b4d1b2c1"
-nanvix-zutil-version = "0.24.0"
+nanvix-zutil-version = "0.16.3"
 
 [metadata.sdk]
 schema-version = 1
@@ -80,10 +80,15 @@ ref-kind = "version"
 ref-value = "1.3.1-nanvix-0.23.16-sdk.1"
 resolved-tag = "1.3.1-nanvix-0.23.16-sdk.1"
 resolved-commitish = "nanvix/v1.3.1"
-release-id = 366840199
+release-id = 366998879
 dependencies = []
 
 [[package.assets]]
 name = "zlib-linux-x86-microvm-standalone-256mb-dev.tar.gz"
 url = "https://github.com/nanvix/zlib/releases/download/1.3.1-nanvix-0.23.16-sdk.1/zlib-linux-x86-microvm-standalone-256mb-dev.tar.gz"
-id = 505315937
+id = 505644075
+
+[[package.assets]]
+name = "zlib-windows-x86-microvm-standalone-256mb-dev.zip"
+url = "https://github.com/nanvix/zlib/releases/download/1.3.1-nanvix-0.23.16-sdk.1/zlib-windows-x86-microvm-standalone-256mb-dev.zip"
+id = 505644076
